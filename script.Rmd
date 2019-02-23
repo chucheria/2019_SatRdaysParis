@@ -1,0 +1,282 @@
+---
+title: "Football meets graphs"
+subtitle: "Code for the slides"
+author: "Bea Hernández"
+date: "`r Sys.Date()`"
+output: tint::tintHtml
+---
+
+```{r setup, include=FALSE}
+library(tint)
+# invalidate cache when the package version changes
+knitr::opts_chunk$set(tidy = FALSE, cache.extra = packageVersion('tint'))
+options(htmltools.dir.version = FALSE)
+```
+
+```{r load, include=FALSE}
+library(magrittr)
+library(neo4r)
+library(purrr)
+library(dplyr)
+library(ggplot2)
+library(visNetwork)
+```
+
+Neo4j CSV import looks for your files in your neo4j import folder so you should move them there.
+
+```{r source_data, include=F}
+path <- '/Users/Beardicion/Downloads/neo4j-community-3.5.2/import/'
+from <- '/Users/Beardicion/Documents/theterminator/src/graphmodel/'
+setwd(from)
+file.copy(c('laliga.csv', 'premier.csv'), path)
+```
+
+```{r neo_connection, include=F}
+con <- neo4j_api$new(
+  url = 'http://localhost:7474',
+  user = 'neo4j',
+  password = 'root'
+)
+con
+con$get_version()
+
+con$get_index()
+con$get_relationships()
+con$get_labels()
+con$get_constraints()
+```
+
+
+To load CSVs, Neo4j looks for the data in its own import folder. To change this we would have to use the APOC LoadCSV plugin but we want to try the neo4r load_csv.
+
+```{r load_csv}
+on_load_query <- 'MERGE (g:Game {date: line.Date, name: line.Game, home_score: line.FTHG, away_score: line.FTAG, season: line.Season})
+  MERGE (th:Team {name: line.HomeTeam})
+  MERGE (ta:Team {name: line.AwayTeam})
+  MERGE (th)-[:HOME_TEAM]->(g)
+  MERGE (ta)-[:AWAY_TEAM]->(g)
+  MERGE (l:League {name: line.League})
+  MERGE (c:Country {name: line.Country})
+  MERGE (g)-[:IN_LEAGUE]->(l)
+  MERGE (l)-[:FROM]->(c);'
+# Send the csv 
+load_csv(url = "file:/premier.csv", 
+         con = con, header = TRUE, periodic_commit = 50, 
+         as = "line", on_load = on_load_query)
+load_csv(url = "file:/laliga.csv", 
+         con = con, header = TRUE, periodic_commit = 50, 
+         as = "line", on_load = on_load_query)
+
+'MATCH (g:Game) WHERE g.name = "NA_NA_NA" DETACH DELETE g' %>%
+  call_neo4j(con)
+```
+
+```{r set_constraints}
+constraints <- c('CREATE CONSTRAINT ON (g:Game) ASSERT g.name IS UNIQUE',
+                 'CREATE CONSTRAINT ON (t:Team) ASSERT t.name IS UNIQUE', 
+                 'CREATE CONSTRAINT ON (c:Country) ASSERT c.name IS UNIQUE',
+                 'CREATE CONSTRAINT ON (l:League) ASSERT l.name IS UNIQUE')
+
+map(constraints, call_neo4j, con = con)
+```
+
+Let's get a sample of a team in a league.
+
+```{r tab_relation, echo=F}
+premier <- 'MATCH m=((t:Team)-[]->(g:Game)-->(l:League)) WHERE l.name = "Premier" RETURN m LIMIT 10' %>%
+  call_neo4j(con, type = 'graph') 
+
+visNetwork(premier$nodes %>% 
+             unnest_nodes(what = "properties") %>%
+             rename(l = label, label = name), 
+           premier$relationships %>%
+             unnest_relationships() %>%
+             select(from = startNode, to = endNode, label = type))
+```
+
+
+# Home advantage
+
+**What is home advantage?** Basically, it is the support you (as a player, referee, or coach) you receive from the crowd. So it is a state of mind, and only at home where your fans are bigger in number compared to the fans of the away team.
+
+We wonder though, if is it really a home advantage or those teams just win everywhere. To prove that we are going to compare the differences between the numbers of winning at home and away.
+
+```{r home_wins, echo=FALSE}
+home_wins <- 'MATCH a=((t:Team)-[:HOME_TEAM]->(g:Game)-->(l:League)) WHERE g.home_score > g.away_score RETURN a' %>%
+  call_neo4j(con) %>%
+  as.data.frame() %>%
+  mutate(year = lubridate::year(as.Date(a.date))) %>%
+  group_by(a.name2, year, a.name) %>%
+  summarise(count = n())
+
+home_wins %>% 
+  group_by(a.name2, year) %>%
+  summarise(sum = sum(count)) %>%
+  ggplot(aes(year, sum, color = a.name2)) +
+  geom_line(size = 1) +
+  stat_smooth(method = "lm", size = 0.5, level = 0) +
+  hrbrthemes::theme_ipsum() + 
+  theme(legend.title = element_blank())
+```
+
+
+```{r away_wins, echo=FALSE}
+away_wins <- 'MATCH a=((t:Team)-[:AWAY_TEAM]->(g:Game)-->(l:League)) WHERE g.away_score > g.home_score RETURN a' %>%
+  call_neo4j(con) %>%
+  as.data.frame() %>%
+  mutate(year = lubridate::year(as.Date(a.date))) %>%
+  group_by(a.name2, year, a.name) %>%
+  summarise(count = n())
+
+away_wins %>% 
+  group_by(a.name2, year) %>%
+  summarise(sum = sum(count)) %>%
+  ggplot(aes(year, sum, color = a.name2)) +
+    geom_line() +
+    stat_smooth(method = "lm", size = 1, level = 0) +
+    hrbrthemes::theme_ipsum()
+```
+
+```{r total_games}
+total_games <- 'MATCH a=((t:Team)-->(g:Game)-->(l:League)) RETURN a' %>%
+  call_neo4j(con) %>%
+  as.data.frame() %>%
+  mutate(year = lubridate::year(as.Date(a.date))) %>%
+  group_by(a.name, year, a.name2) %>%
+  summarise(count = n())
+
+games <- total_games %>%
+  left_join(away_wins, by = c("a.name" = "a.name", "year" = "year", 
+                              "a.name2" = "a.name2"), 
+            suffix = c("_total", "_away")) %>%
+  left_join(home_wins, by = c("a.name" = "a.name", "year" = "year", 
+                              "a.name2" = "a.name2"), 
+            suffix = c("_total", "_home"))
+```
+
+```{r percentage_games}
+games_year <-  games %>%
+  group_by(a.name, a.name2) %>%
+  summarise(total = sum(count_total, na.rm = T), 
+            away = sum(count_away, na.rm = T), 
+            home = sum(count, na.rm = T))
+
+games_year %<>%
+  mutate(percentage_wins = (away + home) / total,
+         percentage_wins_home = home / total,
+         percentage_wins_away = away / total) %>%
+  arrange(desc(percentage_wins))
+
+games %<>%
+  mutate(percentage_wins = (count_away + count) / count_total,
+         percentage_wins_home = count / count_total,
+         percentage_wins_away = count_away / count_total) %>%
+  arrange(desc(percentage_wins))
+
+games_year %>% 
+  filter(a.name2 == 'LaLiga') %>%
+  group_by(a.name) %>%
+  summarise(dif = percentage_wins_home - percentage_wins_away) %>%
+  arrange(dif) %>%
+  mutate(team = as.factor(a.name)) %>%
+  ggplot(aes(x = reorder(team, dif), y = dif, fill = dif)) + 
+  geom_bar(stat = 'identity', position = 'identity') +
+  coord_flip() +
+  hrbrthemes::theme_ipsum() +
+  theme(legend.position = 'none') + 
+  xlab('') + 
+  ylab('Difference in percentage between winning at home vs away')
+
+```
+
+# Competitiveness
+
+*How do we define competitiveness?* 
+
+In a league all teams have matches two times per season. So I would say, you have more competition if there's more uncertainty in which team is going to win that match. 
+
+We are going to transform our data in another graph:
+
+**Two teams are connected if they have received at least one point in the two matches (there has been win-draw, draw-draw, win-win).**
+*You get a point for the draw, 3 points for winning, 0 for losing*
+
+If we sum the points of the two matches we are between 0 and 6 where 0 if you lose two matches and 6 if you won two matches, so those teams would be disconnected.
+
+
+```{r results}
+g <- 'MATCH (g:Game)-->(l:League) RETURN g, l' %>%
+  call_neo4j(con) %>%
+  as.data.frame() %>%
+  tidyr::separate(g.name, into = c('date','home', 'away'), sep = '_')
+  
+
+connected <- bind_rows(g %>% 
+                         group_by(name, g.season, home, away) %>%
+                         summarise(points = sum(case_when(g.home_score > g.away_score ~ 3,
+                                                          g.home_score == g.away_score ~ 1,
+                                                          TRUE ~ 0))),
+                       g %>% 
+                         rename(home = away, away = home) %>%
+                         group_by(name, g.season, home, away) %>%
+                         summarise(points = sum(case_when(g.away_score > g.home_score ~ 3,
+                                                          g.home_score == g.away_score ~ 1,
+                                                          TRUE ~ 0)))) %>%
+  group_by(name, g.season, home, away) %>%
+  summarise(total = sum(points)) %>%
+  filter(total > 0 & total < 6)
+
+```
+
+```{r }
+
+ggplot(connected, aes(g.season, color=name)) +
+  geom_point(stat = 'count', size = 2) +
+  hrbrthemes::theme_ipsum() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1.1)) +
+  theme(legend.title = element_blank()) +
+  ylab('Number of conections') + xlab('Season')
+```
+
+```{r}
+liga_nodes <- connected %>%
+  ungroup() %>%
+  filter(name == 'LaLiga' & g.season == '2017-18') %>%
+  group_by(home) %>%
+  summarise(n = n()) %>%
+  rename(id=home) %>%
+  mutate(label=id) %>%
+  distinct() %>%
+  filter(n < mean(n))
+liga_relationships <- connected %>%
+  ungroup() %>%
+  filter(name == 'LaLiga' & g.season == '2017-18') %>%
+  select(home, away) %>%
+  rename(from=home, to=away) %>%
+  distinct()
+
+visNetwork(liga_nodes,liga_relationships) %>%
+  visEvents(stabilizationIterationsDone="function () {this.setOptions( { physics: false } );}") %>%
+  visLayout(randomSeed=91)
+```
+
+```{r}
+premier_nodes <- connected %>%
+  ungroup() %>%
+  filter(name == 'Premier' & g.season == '2017-18') %>%
+  group_by(home) %>%
+  summarise(n = n()) %>%
+  rename(id=home) %>%
+  mutate(label=id) %>%
+  distinct() %>%
+  filter(n < mean(n))
+premier_relationships <- connected %>%
+  ungroup() %>%
+  filter(name == 'Premier' & g.season == '2017-18') %>%
+  select(home, away) %>%
+  rename(from=home, to=away) %>%
+  distinct()
+
+visNetwork(premier_nodes,premier_relationships) %>%
+  visEvents(stabilizationIterationsDone="function () {this.setOptions( { physics: false } );}") %>%
+  visLayout(randomSeed=91)
+```
