@@ -1,0 +1,29 @@
+version: '3'
+
+networks:
+  lan:
+
+services:
+
+    ncore1:
+        image: neo4j:3.5
+        networks:
+            - lan
+        ports:
+            - 7474:7474
+            - 6477:6477
+            - 7687:7687
+        volumes:
+            - $HOME/neo4j/neo4j-ncore1/conf:/conf
+            - $HOME/neo4j/neo4j-ncore1/data:/data
+            - $HOME/neo4j/neo4j-ncore1/logs:/logs
+            - $HOME/neo4j/neo4j-ncore1/plugins:/plugins
+
+    rcore1:
+        image: monciopeloncio/neo4j-football
+        networks:
+            - lan
+        ports:
+            - 8787:8787
+        environment:
+            - PASSWORD=satuRdays
