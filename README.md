@@ -8,6 +8,8 @@ The *neo4r* package is in experimental phase. That gives us some limits in use, 
 
 ## Data
 
+The data presented in SatRdays was for the La Liga and the Premier League. Another dataset has been aded since the conference, the **"FA Women's Super League"**. The code to import is already in *script.Rmd*, if you execute it in your computer make sure you have the [APOC procedures](https://github.com/neo4j-contrib/neo4j-apoc-procedures) installed.
+
 - [Statsbomb](https://github.com/statsbomb/open-data) for the women futbol.
 
 ## Use the docker

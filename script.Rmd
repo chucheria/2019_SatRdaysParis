@@ -22,14 +22,6 @@ library(ggplot2)
 library(visNetwork)
 ```
 
-Neo4j CSV import looks for your files in your neo4j import folder so you should move them there.
-
-```{r source_data, include=F}
-path <- '/Users/Beardicion/Downloads/neo4j-community-3.5.2/import/'
-from <- '/Users/Beardicion/Documents/theterminator/src/graphmodel/'
-setwd(from)
-file.copy(c('laliga.csv', 'premier.csv'), path)
-```
 
 ```{r neo_connection, include=F}
 con <- neo4j_api$new(
@@ -46,10 +38,16 @@ con$get_labels()
 con$get_constraints()
 ```
 
+## Load data
+
+### Men football
 
 To load CSVs, Neo4j looks for the data in its own import folder. To change this we would have to use the APOC LoadCSV plugin but we want to try the neo4r load_csv.
 
 ```{r load_csv}
+laliga_file <- 'https://raw.githubusercontent.com/chucheria/2019_SatRdaysParis/master/laliga.csv'
+premier_file <- 'https://raw.githubusercontent.com/chucheria/2019_SatRdaysParis/master/premier.csv'
+
 on_load_query <- 'MERGE (g:Game {date: line.Date, name: line.Game, home_score: line.FTHG, away_score: line.FTAG, season: line.Season})
   MERGE (th:Team {name: line.HomeTeam})
   MERGE (ta:Team {name: line.AwayTeam})
@@ -59,17 +57,48 @@ on_load_query <- 'MERGE (g:Game {date: line.Date, name: line.Game, home_score: l
   MERGE (c:Country {name: line.Country})
   MERGE (g)-[:IN_LEAGUE]->(l)
   MERGE (l)-[:FROM]->(c);'
+
 # Send the csv 
-load_csv(url = "file:/premier.csv", 
+load_csv(url = premier_file, 
          con = con, header = TRUE, periodic_commit = 50, 
          as = "line", on_load = on_load_query)
-load_csv(url = "file:/laliga.csv", 
+load_csv(url = laliga_file, 
          con = con, header = TRUE, periodic_commit = 50, 
          as = "line", on_load = on_load_query)
 
 'MATCH (g:Game) WHERE g.name = "NA_NA_NA" DETACH DELETE g' %>%
   call_neo4j(con)
 ```
+
+### Women football
+
+```{r use_apoc}
+women_football <- 'https://raw.githubusercontent.com/chucheria/2019_SatRdaysParis/master/statsbomb.json'
+
+on_load_query <- paste0('WITH "', women_football, '" as json
+                        CALL apoc.load.json(json) YIELD value
+                        UNWIND value.games AS v
+                        MERGE (g:Game {name:v.match_date + "_" + v.home_team.home_team_name + "_" + v.away_team.away_team_name}) ON
+                          CREATE SET g.date = v.match_date,  
+                            g.home_score = v.home_score, 
+                            g.away_score = v.away_score, 
+                            g.season = v.season.season_name
+                          MERGE (c:Country {name:v.competition.country_name})
+                          MERGE (l:League {name:v.competition.competition_name}) 
+                          MERGE (th:Team {name:v.home_team.home_team_name})
+                          MERGE (ta:Team {name:v.away_team.away_team_name})
+                        MERGE (l)-[:FROM]->(c)
+                        MERGE (g)-[:IN_LEAGUE]->(l)
+                        MERGE (th)-[:HOME_TEAM]->(g)
+                        MERGE (ta)-[:AWAY_TEAM]->(g)')
+
+# Send the csv 
+on_load_query %>% call_neo4j(con)
+```
+
+
+### Set constraints
+
 
 ```{r set_constraints}
 constraints <- c('CREATE CONSTRAINT ON (g:Game) ASSERT g.name IS UNIQUE',
@@ -80,7 +109,10 @@ constraints <- c('CREATE CONSTRAINT ON (g:Game) ASSERT g.name IS UNIQUE',
 map(constraints, call_neo4j, con = con)
 ```
 
+## Exploration
+
 Let's get a sample of a team in a league.
+
 
 ```{r tab_relation, echo=F}
 premier <- 'MATCH m=((t:Team)-[]->(g:Game)-->(l:League)) WHERE l.name = "Premier" RETURN m LIMIT 10' %>%
