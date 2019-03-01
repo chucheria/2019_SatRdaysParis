@@ -25,7 +25,7 @@ library(visNetwork)
 
 ```{r neo_connection, include=F}
 con <- neo4j_api$new(
-  url = 'http://localhost:7474',
+  url = 'ncore1:7474',
   user = 'neo4j',
   password = 'root'
 )
@@ -58,12 +58,12 @@ on_load_query <- 'MERGE (g:Game {date: line.Date, name: line.Game, home_score: l
   MERGE (g)-[:IN_LEAGUE]->(l)
   MERGE (l)-[:FROM]->(c);'
 
-# Send the csv 
-load_csv(url = premier_file, 
-         con = con, header = TRUE, periodic_commit = 50, 
+# Send the csv
+load_csv(url = premier_file,
+         con = con, header = TRUE, periodic_commit = 50,
          as = "line", on_load = on_load_query)
-load_csv(url = laliga_file, 
-         con = con, header = TRUE, periodic_commit = 50, 
+load_csv(url = laliga_file,
+         con = con, header = TRUE, periodic_commit = 50,
          as = "line", on_load = on_load_query)
 
 'MATCH (g:Game) WHERE g.name = "NA_NA_NA" DETACH DELETE g' %>%
@@ -80,11 +80,11 @@ on_load_query <- paste0('WITH "', women_football, '" as json
                         UNWIND value.games AS v
                         MERGE (g:Game {name:v.match_date + "_" + v.home_team.home_team_name + "_" + v.away_team.away_team_name}) ON
                           CREATE SET g.date = v.match_date,  
-                            g.home_score = v.home_score, 
-                            g.away_score = v.away_score, 
+                            g.home_score = v.home_score,
+                            g.away_score = v.away_score,
                             g.season = v.season.season_name
                           MERGE (c:Country {name:v.competition.country_name})
-                          MERGE (l:League {name:v.competition.competition_name}) 
+                          MERGE (l:League {name:v.competition.competition_name})
                           MERGE (th:Team {name:v.home_team.home_team_name})
                           MERGE (ta:Team {name:v.away_team.away_team_name})
                         MERGE (l)-[:FROM]->(c)
@@ -92,7 +92,7 @@ on_load_query <- paste0('WITH "', women_football, '" as json
                         MERGE (th)-[:HOME_TEAM]->(g)
                         MERGE (ta)-[:AWAY_TEAM]->(g)')
 
-# Send the csv 
+# Send the csv
 on_load_query %>% call_neo4j(con)
 ```
 
@@ -102,7 +102,7 @@ on_load_query %>% call_neo4j(con)
 
 ```{r set_constraints}
 constraints <- c('CREATE CONSTRAINT ON (g:Game) ASSERT g.name IS UNIQUE',
-                 'CREATE CONSTRAINT ON (t:Team) ASSERT t.name IS UNIQUE', 
+                 'CREATE CONSTRAINT ON (t:Team) ASSERT t.name IS UNIQUE',
                  'CREATE CONSTRAINT ON (c:Country) ASSERT c.name IS UNIQUE',
                  'CREATE CONSTRAINT ON (l:League) ASSERT l.name IS UNIQUE')
 
@@ -116,11 +116,11 @@ Let's get a sample of a team in a league.
 
 ```{r tab_relation, echo=F}
 premier <- 'MATCH m=((t:Team)-[]->(g:Game)-->(l:League)) WHERE l.name = "Premier" RETURN m LIMIT 10' %>%
-  call_neo4j(con, type = 'graph') 
+  call_neo4j(con, type = 'graph')
 
-visNetwork(premier$nodes %>% 
+visNetwork(premier$nodes %>%
              unnest_nodes(what = "properties") %>%
-             rename(l = label, label = name), 
+             rename(l = label, label = name),
            premier$relationships %>%
              unnest_relationships() %>%
              select(from = startNode, to = endNode, label = type))
@@ -141,13 +141,13 @@ home_wins <- 'MATCH a=((t:Team)-[:HOME_TEAM]->(g:Game)-->(l:League)) WHERE g.hom
   group_by(a.name2, year, a.name) %>%
   summarise(count = n())
 
-home_wins %>% 
+home_wins %>%
   group_by(a.name2, year) %>%
   summarise(sum = sum(count)) %>%
   ggplot(aes(year, sum, color = a.name2)) +
   geom_line(size = 1) +
   stat_smooth(method = "lm", size = 0.5, level = 0) +
-  hrbrthemes::theme_ipsum() + 
+  hrbrthemes::theme_ipsum() +
   theme(legend.title = element_blank())
 ```
 
@@ -160,7 +160,7 @@ away_wins <- 'MATCH a=((t:Team)-[:AWAY_TEAM]->(g:Game)-->(l:League)) WHERE g.awa
   group_by(a.name2, year, a.name) %>%
   summarise(count = n())
 
-away_wins %>% 
+away_wins %>%
   group_by(a.name2, year) %>%
   summarise(sum = sum(count)) %>%
   ggplot(aes(year, sum, color = a.name2)) +
@@ -178,19 +178,19 @@ total_games <- 'MATCH a=((t:Team)-->(g:Game)-->(l:League)) RETURN a' %>%
   summarise(count = n())
 
 games <- total_games %>%
-  left_join(away_wins, by = c("a.name" = "a.name", "year" = "year", 
-                              "a.name2" = "a.name2"), 
+  left_join(away_wins, by = c("a.name" = "a.name", "year" = "year",
+                              "a.name2" = "a.name2"),
             suffix = c("_total", "_away")) %>%
-  left_join(home_wins, by = c("a.name" = "a.name", "year" = "year", 
-                              "a.name2" = "a.name2"), 
+  left_join(home_wins, by = c("a.name" = "a.name", "year" = "year",
+                              "a.name2" = "a.name2"),
             suffix = c("_total", "_home"))
 ```
 
 ```{r percentage_games}
 games_year <-  games %>%
   group_by(a.name, a.name2) %>%
-  summarise(total = sum(count_total, na.rm = T), 
-            away = sum(count_away, na.rm = T), 
+  summarise(total = sum(count_total, na.rm = T),
+            away = sum(count_away, na.rm = T),
             home = sum(count, na.rm = T))
 
 games_year %<>%
@@ -205,27 +205,27 @@ games %<>%
          percentage_wins_away = count_away / count_total) %>%
   arrange(desc(percentage_wins))
 
-games_year %>% 
+games_year %>%
   filter(a.name2 == 'LaLiga') %>%
   group_by(a.name) %>%
   summarise(dif = percentage_wins_home - percentage_wins_away) %>%
   arrange(dif) %>%
   mutate(team = as.factor(a.name)) %>%
-  ggplot(aes(x = reorder(team, dif), y = dif, fill = dif)) + 
+  ggplot(aes(x = reorder(team, dif), y = dif, fill = dif)) +
   geom_bar(stat = 'identity', position = 'identity') +
   coord_flip() +
   hrbrthemes::theme_ipsum() +
-  theme(legend.position = 'none') + 
-  xlab('') + 
+  theme(legend.position = 'none') +
+  xlab('') +
   ylab('Difference in percentage between winning at home vs away')
 
 ```
 
 # Competitiveness
 
-*How do we define competitiveness?* 
+*How do we define competitiveness?*
 
-In a league all teams have matches two times per season. So I would say, you have more competition if there's more uncertainty in which team is going to win that match. 
+In a league all teams have matches two times per season. So I would say, you have more competition if there's more uncertainty in which team is going to win that match.
 
 We are going to transform our data in another graph:
 
@@ -240,14 +240,14 @@ g <- 'MATCH (g:Game)-->(l:League) RETURN g, l' %>%
   call_neo4j(con) %>%
   as.data.frame() %>%
   tidyr::separate(g.name, into = c('date','home', 'away'), sep = '_')
-  
 
-connected <- bind_rows(g %>% 
+
+connected <- bind_rows(g %>%
                          group_by(name, g.season, home, away) %>%
                          summarise(points = sum(case_when(g.home_score > g.away_score ~ 3,
                                                           g.home_score == g.away_score ~ 1,
                                                           TRUE ~ 0))),
-                       g %>% 
+                       g %>%
                          rename(home = away, away = home) %>%
                          group_by(name, g.season, home, away) %>%
                          summarise(points = sum(case_when(g.away_score > g.home_score ~ 3,
