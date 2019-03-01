@@ -17,7 +17,9 @@ services:
             - $HOME/neo4j/neo4j-ncore1/conf:/conf
             - $HOME/neo4j/neo4j-ncore1/data:/data
             - $HOME/neo4j/neo4j-ncore1/logs:/logs
-            - $HOME/neo4j/neo4j-ncore1/plugins:/plugins
+            - ./plugins:/plugins
+        environment:
+            - NEO4J_dbms_security_procedures_unrestricted=apoc.\\\*
 
     rcore1:
         image: monciopeloncio/neo4j-football
