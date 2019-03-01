@@ -6,6 +6,9 @@ RUN R -e 'install.packages("remotes")' && R -e 'remotes::install_github("neo4j-r
 
 RUN mkdir /home/rstudio/2019_SatRdaysParis
 
-COPY ./ /home/rstudio/2019_SatRdaysParis
+COPY ./*.csv /home/rstudio/2019_SatRdaysParis/
+COPY ./script.Rmd /home/rstudio/2019_SatRdaysParis/
+COPY ./clean.R /home/rstudio/2019_SatRdaysParis/
+COPY ./README.md /home/rstudio/2019_SatRdaysParis/
 
 EXPOSE 8787
