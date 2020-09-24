@@ -25,7 +25,8 @@ library(visNetwork)
 
 ```{r neo_connection, include=F}
 con <- neo4j_api$new(
-  url = 'ncore1:7474',
+  #url = 'ncore1:7474',
+  url = 'http://localhost:7474',
   user = 'neo4j',
   password = 'root'
 )
@@ -134,7 +135,7 @@ visNetwork(premier$nodes %>%
 We wonder though, if is it really a home advantage or those teams just win everywhere. To prove that we are going to compare the differences between the numbers of winning at home and away.
 
 ```{r home_wins, echo=FALSE}
-home_wins <- 'MATCH a=((t:Team)-[:HOME_TEAM]->(g:Game)-->(l:League)) WHERE g.home_score > g.away_score RETURN a' %>%
+home_wins <- 'MATCH a=((t:Team)-[:HOME_TEAM]->(g:Game)-->(l:League {name: "Premier"})) WHERE g.home_score > g.away_score RETURN a' %>%
   call_neo4j(con) %>%
   as.data.frame() %>%
   mutate(year = lubridate::year(as.Date(a.date))) %>%
@@ -153,7 +154,7 @@ home_wins %>%
 
 
 ```{r away_wins, echo=FALSE}
-away_wins <- 'MATCH a=((t:Team)-[:AWAY_TEAM]->(g:Game)-->(l:League)) WHERE g.away_score > g.home_score RETURN a' %>%
+away_wins <- 'MATCH a=((t:Team)-[:AWAY_TEAM]->(g:Game)-->(l:League {name: "Premier"})) WHERE g.away_score > g.home_score RETURN a' %>%
   call_neo4j(con) %>%
   as.data.frame() %>%
   mutate(year = lubridate::year(as.Date(a.date))) %>%
@@ -170,7 +171,7 @@ away_wins %>%
 ```
 
 ```{r total_games}
-total_games <- 'MATCH a=((t:Team)-->(g:Game)-->(l:League)) RETURN a' %>%
+total_games <- 'MATCH a=((t:Team)-->(g:Game)-->(l:League {name: "Premier"})) RETURN a' %>%
   call_neo4j(con) %>%
   as.data.frame() %>%
   mutate(year = lubridate::year(as.Date(a.date))) %>%
